@@ -236,11 +236,20 @@ This will:
 
 ### Manual Demucs Processing
 
-If you want to process audio files manually:
+If you want to process audio files manually, you can use the Demucs command line interface directly:
 
 ```bash
-python demucs_example.py
+# Basic usage
+demucs --two-stems vocals audio.mp3
+
+# With MP3 output
+demucs --mp3 --two-stems vocals audio.mp3
+
+# Using the Hybrid Transformer model (recommended)
+demucs -n htdemucs --mp3 --two-stems vocals audio.mp3
 ```
+
+For more advanced usage, see the [Demucs GitHub repository](https://github.com/adefossez/demucs).
 
 ### Batch Processing
 
@@ -292,7 +301,6 @@ pip install --upgrade yt-dlp
 youtube-short-music-finder/
 ├── simple_pipeline.py          # Main pipeline script
 ├── test_acrcloud.py           # ACRCloud testing script
-├── demucs_example.py          # Demucs usage example
 ├── requirements.txt           # Python dependencies
 ├── .env                      # API credentials (create this)
 ├── README.md                 # This file
@@ -318,7 +326,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **Demucs**: Facebook Research for the audio separation model
+- **Demucs**: Facebook Research for the audio separation model - [GitHub Repository](https://github.com/adefossez/demucs)
 - **ACRCloud**: For the music recognition API
 - **yt-dlp**: For YouTube downloading capabilities
 
@@ -330,6 +338,44 @@ If you encounter issues:
 2. Search existing GitHub issues
 3. Create a new issue with detailed information
 4. Include your operating system and error messages
+
+## 🔍 Manual Verification with Shazam
+
+If the automatic identification fails or gives incorrect results, you can use Shazam as a backup method:
+
+### When to Use Manual Verification
+- **No song found** by ACRCloud
+- **Incorrect song identified** 
+- **Low confidence scores**
+- **Want to double-check results**
+
+### Manual Verification Steps
+
+1. **Locate the separated audio file**
+   - The pipeline will show you the exact path
+   - Usually: `separated/htdemucs/audio/no_vocals.mp3`
+
+2. **Play the audio file**
+   - Open the file on your computer
+   - Play at **loud volume** for best results
+   - Ensure good audio quality
+
+3. **Use Shazam on your phone**
+   - Open the Shazam app
+   - Let it listen to the background music
+   - Shazam works well with clean instrumental tracks
+
+### Why This Works
+- **Shazam excels** at identifying clean music without vocals
+- **No speech interference** since vocals are removed
+- **Better recognition** of instrumental parts
+- **Real-time identification** with immediate results
+
+### Tips for Best Results
+- **Use headphones** or good speakers
+- **Minimize background noise** in your environment
+- **Play the entire track** if it's short
+- **Try different segments** if the first attempt fails
 
 ---
 

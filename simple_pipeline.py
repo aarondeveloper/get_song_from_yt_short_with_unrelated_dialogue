@@ -491,6 +491,18 @@ def main():
     
     print("\n🎉 Process completed!")
     print("\n💡 Get free ACRCloud API key from: https://www.acrcloud.com/")
+    
+    # Always show manual verification option
+    print("\n" + "="*60)
+    print("🔍 MANUAL VERIFICATION")
+    print("="*60)
+    print("Was the song not found? Or is the result incorrect?")
+    print("Try this manual approach:")
+    print(f"1. Navigate to: {Path.cwd() / 'separated' / 'htdemucs' / 'audio' / 'no_vocals.mp3'}")
+    print("2. Play this file on your computer at loud volume")
+    print("3. Open the Shazam app on your phone")
+    print("4. Let Shazam listen to the background music")
+    print("="*60)
 
 if __name__ == "__main__":
     main() 
