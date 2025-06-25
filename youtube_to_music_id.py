@@ -27,30 +27,32 @@ class YouTubeToMusicID:
         self.temp_dir.mkdir(exist_ok=True)
         
     def download_youtube_short(self, url):
-        """Download YouTube Short using yt-dlp"""
-        print(f"🎬 Downloading YouTube Short: {url}")
+        """Download YouTube Short audio directly as MP3 using yt-dlp"""
+        print(f"🎬 Downloading audio from YouTube Short: {url}")
         
         try:
-            # Simple download command - yt-dlp handles format selection automatically
+            # Download audio directly as MP3
             cmd = [
                 "yt-dlp",
-                "-f", "b",  # Best pre-merged format (suppresses warning)
-                "-o", str(self.temp_dir / "video.%(ext)s"),
+                "-x",  # Extract audio only
+                "--audio-format", "mp3",  # Convert to MP3
+                "--audio-quality", "0",  # Best quality
+                "-o", str(self.temp_dir / "audio.%(ext)s"),
                 url
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print("✅ Video downloaded successfully")
+            print("✅ Audio downloaded successfully")
             
-            # Find the downloaded file
-            video_files = list(self.temp_dir.glob("video.*"))
-            if video_files:
-                return video_files[0]
+            # Find the downloaded audio file
+            audio_files = list(self.temp_dir.glob("audio.*"))
+            if audio_files:
+                return audio_files[0]
             else:
-                raise FileNotFoundError("Downloaded video file not found")
+                raise FileNotFoundError("Downloaded audio file not found")
                 
         except subprocess.CalledProcessError as e:
-            print(f"❌ Error downloading video: {e}")
+            print(f"❌ Error downloading audio: {e}")
             print(f"Error output: {e.stderr}")
             return None
     
@@ -80,9 +82,57 @@ class YouTubeToMusicID:
             print(f"❌ Error extracting audio: {e}")
             return None
     
-    def remove_speech(self, audio_path):
-        """Remove speech using Demucs"""
+    def remove_speech_demucs_api(self, audio_path):
+        """Remove speech using Demucs Python API"""
         print("🔇 Removing speech using Demucs...")
+        print("⚠️  This may take a few minutes depending on audio length...")
+        
+        try:
+            # Import demucs
+            import demucs.separate
+            
+            # Create output directory for Demucs
+            demucs_output = self.temp_dir / "separated"
+            demucs_output.mkdir(exist_ok=True)
+            
+            # Run Demucs using the Python API
+            # This is equivalent to: demucs --two-stems=vocals audio.wav
+            demucs.separate.main([
+                "--two-stems=vocals",
+                "-o", str(demucs_output),
+                str(audio_path)
+            ])
+            
+            # Find the separated audio file
+            # Demucs creates output in: separated/htdemucs/audio/no_vocals.wav
+            model_name = "htdemucs"  # Default model
+            audio_name = audio_path.stem
+            no_vocals_path = demucs_output / model_name / audio_name / "no_vocals.wav"
+            
+            if no_vocals_path.exists():
+                print("✅ Speech removed successfully using Demucs API")
+                return no_vocals_path
+            else:
+                print("❌ Could not find separated audio file")
+                return None
+                
+        except ImportError:
+            print("❌ Demucs not installed. Installing...")
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "demucs"], check=True)
+                print("✅ Demucs installed successfully")
+                # Try again
+                return self.remove_speech_demucs_api(audio_path)
+            except subprocess.CalledProcessError:
+                print("❌ Failed to install Demucs")
+                return None
+        except Exception as e:
+            print(f"❌ Error removing speech with Demucs API: {e}")
+            return None
+    
+    def remove_speech_subprocess(self, audio_path):
+        """Remove speech using Demucs subprocess (fallback method)"""
+        print("🔇 Removing speech using Demucs subprocess...")
         print("⚠️  This may take a few minutes depending on audio length...")
         
         try:
@@ -97,7 +147,7 @@ class YouTubeToMusicID:
             
             # Demucs creates output in a specific directory structure
             # Look for the "no_vocals" file
-            demucs_output = self.temp_dir / "separated" / "mdx_extra_q" / "audio"
+            demucs_output = self.temp_dir / "separated" / "htdemucs" / audio_path.stem
             no_vocals_path = demucs_output / "no_vocals.wav"
             
             if no_vocals_path.exists():
@@ -110,6 +160,17 @@ class YouTubeToMusicID:
         except subprocess.CalledProcessError as e:
             print(f"❌ Error removing speech: {e}")
             return None
+    
+    def remove_speech(self, audio_path):
+        """Remove speech using Demucs (tries API first, then subprocess)"""
+        # Try Python API first
+        result = self.remove_speech_demucs_api(audio_path)
+        if result:
+            return result
+        
+        # Fallback to subprocess
+        print("🔄 Falling back to subprocess method...")
+        return self.remove_speech_subprocess(audio_path)
     
     def convert_to_mp3(self, audio_path):
         """Convert audio to MP3 format for API upload"""
@@ -215,30 +276,25 @@ class YouTubeToMusicID:
         print("🚀 Starting YouTube Short to Music Identification Pipeline")
         print("=" * 60)
         
-        # Step 1: Download YouTube Short
-        video_path = self.download_youtube_short(youtube_url)
-        if not video_path:
-            return False
-        
-        # Step 2: Extract audio
-        audio_path = self.extract_audio(video_path)
+        # Step 1: Download YouTube Short audio directly
+        audio_path = self.download_youtube_short(youtube_url)
         if not audio_path:
             return False
         
-        # Step 3: Remove speech
+        # Step 2: Remove speech
         music_path = self.remove_speech(audio_path)
         if not music_path:
             return False
         
-        # Step 4: Convert to MP3 for API upload
+        # Step 3: Convert to MP3 for API upload (if needed)
         mp3_path = self.convert_to_mp3(music_path)
         if not mp3_path:
             return False
         
-        # Step 5: Identify song with ACRCloud
+        # Step 4: Identify song with ACRCloud
         song_info = self.identify_song_acrcloud(mp3_path)
         
-        # Step 6: Cleanup (optional)
+        # Step 5: Cleanup (optional)
         if not keep_files:
             self.cleanup()
         else:
@@ -259,7 +315,7 @@ def main():
     args = parser.parse_args()
     
     # Check if required tools are installed
-    required_tools = ["yt-dlp", "ffmpeg", "demucs"]
+    required_tools = ["yt-dlp", "ffmpeg"]
     missing_tools = []
     
     for tool in required_tools:
@@ -273,7 +329,7 @@ def main():
         for tool in missing_tools:
             print(f"   - {tool}")
         print("\n📦 Install missing tools:")
-        print("   pip install yt-dlp demucs")
+        print("   pip install yt-dlp")
         print("   # Install ffmpeg from: https://ffmpeg.org/download.html")
         return
     
