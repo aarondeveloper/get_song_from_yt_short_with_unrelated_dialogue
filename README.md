@@ -236,11 +236,20 @@ This will:
 
 ### Manual Demucs Processing
 
-If you want to process audio files manually:
+If you want to process audio files manually, you can use the Demucs command line interface directly:
 
 ```bash
-python demucs_example.py
+# Basic usage
+demucs --two-stems vocals audio.mp3
+
+# With MP3 output
+demucs --mp3 --two-stems vocals audio.mp3
+
+# Using the Hybrid Transformer model (recommended)
+demucs -n htdemucs --mp3 --two-stems vocals audio.mp3
 ```
+
+For more advanced usage, see the [Demucs GitHub repository](https://github.com/adefossez/demucs).
 
 ### Batch Processing
 
@@ -292,7 +301,6 @@ pip install --upgrade yt-dlp
 youtube-short-music-finder/
 ├── simple_pipeline.py          # Main pipeline script
 ├── test_acrcloud.py           # ACRCloud testing script
-├── demucs_example.py          # Demucs usage example
 ├── requirements.txt           # Python dependencies
 ├── .env                      # API credentials (create this)
 ├── README.md                 # This file
@@ -318,7 +326,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **Demucs**: Facebook Research for the audio separation model
+- **Demucs**: Facebook Research for the audio separation model - [GitHub Repository](https://github.com/adefossez/demucs)
 - **ACRCloud**: For the music recognition API
 - **yt-dlp**: For YouTube downloading capabilities
 
