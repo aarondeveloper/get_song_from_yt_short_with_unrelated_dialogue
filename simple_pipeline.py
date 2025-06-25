@@ -10,6 +10,10 @@ import sys
 import requests
 import json
 import os
+import base64
+import hashlib
+import hmac
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -106,70 +110,100 @@ def remove_speech(audio_path):
     """Remove vocals using local Demucs only"""
     return remove_speech_demucs(audio_path)
 
-def identify_with_acrcloud(audio_path, api_key=None, host=None):
-    """Identify song using ACRCloud API"""
+def identify_with_acrcloud_rest(audio_path, access_key=None, access_secret=None, host=None):
+    """Identify song using ACRCloud REST API (official demo implementation)"""
     # Use provided values or fall back to environment variables
-    api_key = api_key or os.getenv('ACRCLOUD_API_KEY')
+    access_key = access_key or os.getenv('ACRCLOUD_ACCESS_KEY')
+    access_secret = access_secret or os.getenv('ACRCLOUD_ACCESS_SECRET')
     host = host or os.getenv('ACRCLOUD_HOST')
     
-    if not api_key or not host:
-        print("❌ ACRCloud API credentials not found!")
-        print("💡 Set ACRCLOUD_API_KEY and ACRCLOUD_HOST in your .env file")
+    if not access_key or not access_secret or not host:
+        print("❌ ACRCloud credentials not found!")
+        print("💡 Set ACRCLOUD_ACCESS_KEY, ACRCLOUD_ACCESS_SECRET, and ACRCLOUD_HOST in your .env file")
         return None
     
-    print("🎵 Identifying with ACRCloud...")
+    print("🎵 Identifying with ACRCloud REST API...")
     
     try:
-        with open(audio_path, 'rb') as f:
-            audio_data = f.read()
+        # Build the request URL
+        requrl = f"https://{host}/v1/identify"
         
-        # ACRCloud signature creation
-        import hashlib
-        import hmac
-        import base64
-        import time
-        
-        timestamp = str(int(time.time()))
+        # HTTP method and URI
         http_method = "POST"
         http_uri = "/v1/identify"
         data_type = "audio"
         signature_version = "1"
+        timestamp = time.time()
         
-        string_to_sign = '\n'.join([http_method, http_uri, api_key, data_type, signature_version, timestamp])
-        sign = base64.b64encode(hmac.new(api_key.encode('ascii'), string_to_sign.encode('ascii'), digestmod=hashlib.sha1).digest()).decode('ascii')
+        # Create signature string
+        string_to_sign = (http_method + "\n" + http_uri + "\n" + access_key + "\n" + 
+                         data_type + "\n" + signature_version + "\n" + str(timestamp))
         
-        headers = {
-            'access-key': api_key,
+        # Generate signature
+        sign = base64.b64encode(
+            hmac.new(access_secret.encode('ascii'), 
+                    string_to_sign.encode('ascii'),
+                    digestmod=hashlib.sha1).digest()
+        ).decode('ascii')
+        
+        # Get file size
+        sample_bytes = os.path.getsize(str(audio_path))
+        
+        # Check file size (ACRCloud recommends < 1MB, better within 15 seconds)
+        if sample_bytes > 1024 * 1024:  # 1MB
+            print(f"⚠️  File size ({sample_bytes} bytes) is large. Consider using a shorter audio segment.")
+        
+        # Prepare files and data for upload
+        files = [
+            ('sample', (audio_path.name, open(str(audio_path), 'rb'), 'audio/mpeg'))
+        ]
+        
+        data = {
+            'access_key': access_key,
+            'sample_bytes': sample_bytes,
+            'timestamp': str(timestamp),
             'signature': sign,
-            'signature-version': signature_version,
-            'timestamp': timestamp,
-            'data-type': data_type
+            'data_type': data_type,
+            'signature_version': signature_version
         }
         
-        files = {'sample': audio_data}
-        url = f"https://{host}/v1/identify"
-        response = requests.post(url, headers=headers, files=files)
+        # Make the request
+        print(f"📤 Uploading {sample_bytes} bytes to ACRCloud...")
+        r = requests.post(requrl, files=files, data=data, timeout=30)
+        r.encoding = "utf-8"
         
-        if response.status_code == 200:
-            result = response.json()
-            if result.get('status', {}).get('code') == 0 and result.get('metadata', {}).get('music'):
+        # Parse response
+        try:
+            result = json.loads(r.text)
+            
+            # Check if we got a successful match
+            if (result.get('status', {}).get('code') == 0 and 
+                result.get('metadata', {}).get('music')):
+                
                 music = result['metadata']['music'][0]
                 print("✅ Song identified with ACRCloud!")
                 print(f"🎵 Title: {music.get('title', 'Unknown')}")
                 print(f"👤 Artist: {music.get('artists', [{}])[0].get('name', 'Unknown')}")
                 print(f"📀 Album: {music.get('album', {}).get('name', 'Unknown')}")
                 print(f"🎼 Genre: {music.get('genres', [{}])[0].get('name', 'Unknown')}")
+                print(f"🎯 Confidence: {music.get('score', 'Unknown')}")
                 return music
             else:
-                print("❌ No match found with ACRCloud")
+                print("❌ No match found")
+                print(f"Response: {r.text}")
                 return None
-        else:
-            print(f"❌ ACRCloud API failed: {response.status_code}")
+                
+        except json.JSONDecodeError:
+            print(f"❌ Invalid JSON response: {r.text}")
             return None
             
     except Exception as e:
-        print(f"❌ ACRCloud error: {e}")
+        print(f"❌ ACRCloud REST API error: {e}")
         return None
+
+def identify_with_acrcloud(audio_path, access_key=None, access_secret=None, host=None):
+    """Wrapper function - use the REST API implementation"""
+    return identify_with_acrcloud_rest(audio_path, access_key, access_secret, host)
 
 def open_web_services():
     """Open web-based vocal removal services"""
@@ -284,10 +318,11 @@ def main():
     print(f"\n✅ Audio downloaded to: {audio_path}")
     
     # Check if ACRCloud credentials are available
-    acrcloud_key = os.getenv('ACRCLOUD_API_KEY')
+    acrcloud_key = os.getenv('ACRCLOUD_ACCESS_KEY')
+    acrcloud_secret = os.getenv('ACRCLOUD_ACCESS_SECRET')
     acrcloud_host = os.getenv('ACRCLOUD_HOST')
     
-    if acrcloud_key and acrcloud_host:
+    if acrcloud_key and acrcloud_secret and acrcloud_host:
         print(f"✅ ACRCloud credentials found in .env file")
         print(f"   Host: {acrcloud_host}")
     else:
@@ -307,15 +342,16 @@ def main():
     # Step 2: Identify song with ACRCloud
     print("\n🎵 Step 2: Identifying song...")
     
-    if acrcloud_key and acrcloud_host:
+    if acrcloud_key and acrcloud_secret and acrcloud_host:
         result = identify_with_acrcloud(no_vocals_path)
     else:
         # Ask for manual input
         print("🔑 Enter ACRCloud credentials:")
-        manual_key = input("API Key: ").strip()
+        manual_key = input("Access Key: ").strip()
+        manual_secret = input("Access Secret: ").strip()
         manual_host = input("Host: ").strip()
-        if manual_key and manual_host:
-            result = identify_with_acrcloud(no_vocals_path, manual_key, manual_host)
+        if manual_key and manual_secret and manual_host:
+            result = identify_with_acrcloud(no_vocals_path, manual_key, manual_secret, manual_host)
         else:
             print("❌ No credentials provided")
             result = None
