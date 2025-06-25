@@ -24,7 +24,8 @@ pip install -r requirements.txt
 # Windows: Download from https://ffmpeg.org/download.html
 
 # Create .env file with your ACRCloud credentials
-echo "ACRCLOUD_API_KEY=your_api_key_here" > .env
+echo "ACRCLOUD_ACCESS_KEY=your_access_key_here" > .env
+echo "ACRCLOUD_ACCESS_SECRET=your_access_secret_here" >> .env
 echo "ACRCLOUD_HOST=your_host_here" >> .env
 
 # Run the full pipeline
@@ -38,7 +39,8 @@ python youtube_to_music_id.py "YOUR_YOUTUBE_SHORT_URL"
 pip install yt-dlp
 
 # Create .env file (optional - will prompt for credentials if not found)
-echo "ACRCLOUD_API_KEY=your_api_key_here" > .env
+echo "ACRCLOUD_ACCESS_KEY=your_access_key_here" > .env
+echo "ACRCLOUD_ACCESS_SECRET=your_access_secret_here" >> .env
 echo "ACRCLOUD_HOST=your_host_here" >> .env
 
 # Run interactive script
@@ -84,7 +86,7 @@ Download ffmpeg from https://ffmpeg.org/download.html and add to PATH
 1. Go to https://www.acrcloud.com/
 2. Sign up for a free account
 3. Create a new project
-4. Get your API key and host from the project settings
+4. Get your access key, access secret, and host from the project settings
 5. Free tier available
 
 ### 4. Set Up Environment Variables
@@ -93,13 +95,15 @@ Create a `.env` file in the project directory:
 
 ```bash
 # .env file
-ACRCLOUD_API_KEY=your_acrcloud_api_key_here
+ACRCLOUD_ACCESS_KEY=your_acrcloud_access_key_here
+ACRCLOUD_ACCESS_SECRET=your_acrcloud_access_secret_here
 ACRCLOUD_HOST=your_acrcloud_host_here
 ```
 
 **Example:**
 ```bash
-ACRCLOUD_API_KEY=1234567890abcdef1234567890abcdef
+ACRCLOUD_ACCESS_KEY=1234567890abcdef1234567890abcdef
+ACRCLOUD_ACCESS_SECRET=abcdef1234567890abcdef1234567890
 ACRCLOUD_HOST=identify-eu-west-1.acrcloud.com
 ```
 
@@ -224,7 +228,8 @@ The scripts automatically load API credentials from a `.env` file. Create this f
 
 ```bash
 # .env file
-ACRCLOUD_API_KEY=your_acrcloud_api_key_here
+ACRCLOUD_ACCESS_KEY=your_acrcloud_access_key_here
+ACRCLOUD_ACCESS_SECRET=your_acrcloud_access_secret_here
 ACRCLOUD_HOST=your_acrcloud_host_here
 ```
 

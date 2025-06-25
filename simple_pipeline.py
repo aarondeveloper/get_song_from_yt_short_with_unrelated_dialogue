@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Simple YouTube Short to Music Identification Pipeline
-Uses web-based services and ACRCloud API for easier setup
+Uses ACRCloud API for reliable song identification
 """
 
 import webbrowser
@@ -10,6 +10,11 @@ import sys
 import requests
 import json
 import os
+import base64
+import hashlib
+import hmac
+import time
+import random
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -52,6 +57,40 @@ def download_with_yt_dlp(url):
     except subprocess.CalledProcessError as e:
         print(f"❌ Download failed: {e}")
         return None
+
+def get_audio_duration(audio_path):
+    """Get audio duration using ffprobe"""
+    try:
+        cmd = [
+            "ffprobe", 
+            "-v", "quiet", 
+            "-show_entries", "format=duration", 
+            "-of", "csv=p=0", 
+            str(audio_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        print("⚠️  Could not determine audio duration, assuming 60 seconds")
+        return 60.0
+
+def extract_audio_segment(input_path, output_path, start_time, duration=20):
+    """Extract a segment from audio file using ffmpeg"""
+    try:
+        cmd = [
+            "ffmpeg",
+            "-i", str(input_path),
+            "-ss", str(start_time),
+            "-t", str(duration),
+            "-c", "copy",  # Copy without re-encoding for speed
+            "-y",  # Overwrite output file
+            str(output_path)
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to extract segment: {e}")
+        return False
 
 def remove_speech_demucs(audio_path):
     """Remove vocals using local Demucs (Python API, fallback to subprocess)"""
@@ -102,111 +141,213 @@ def remove_speech_demucs(audio_path):
         print(f"❌ Demucs subprocess also failed: {e}")
         return None
 
-def remove_speech(audio_path):
-    """Remove vocals using local Demucs only"""
-    return remove_speech_demucs(audio_path)
-
-def identify_with_acrcloud(audio_path, api_key=None, host=None):
-    """Identify song using ACRCloud API"""
+def identify_with_acrcloud_improved(audio_path, access_key=None, access_secret=None, host=None):
+    """Identify song using enhanced ACRCloud REST API with multiple segment testing"""
     # Use provided values or fall back to environment variables
-    api_key = api_key or os.getenv('ACRCLOUD_API_KEY')
+    access_key = access_key or os.getenv('ACRCLOUD_ACCESS_KEY')
+    access_secret = access_secret or os.getenv('ACRCLOUD_ACCESS_SECRET')
     host = host or os.getenv('ACRCLOUD_HOST')
     
-    if not api_key or not host:
-        print("❌ ACRCloud API credentials not found!")
-        print("💡 Set ACRCLOUD_API_KEY and ACRCLOUD_HOST in your .env file")
+    if not access_key or not access_secret or not host:
+        print("❌ ACRCloud credentials not found!")
+        print("💡 Set ACRCLOUD_ACCESS_KEY, ACRCLOUD_ACCESS_SECRET, and ACRCLOUD_HOST in your .env file")
         return None
     
-    print("🎵 Identifying with ACRCloud...")
+    print("🎵 Identifying with ACRCloud REST API...")
+    print(f"📁 Using audio file: {audio_path}")
     
+    # Get file size and duration
+    sample_bytes = os.path.getsize(str(audio_path))
+    duration = get_audio_duration(audio_path)
+    
+    print(f"📊 File size: {sample_bytes} bytes")
+    print(f"⏱️  Duration: {duration:.1f} seconds")
+    
+    # Always extract multiple segments for better testing
+    print("📦 Extracting multiple 20-second segments for testing...")
+    
+    # Calculate how many segments we can extract
+    max_segments = min(5, int(duration // 20))  # Test up to 5 segments
+    if max_segments < 1:
+        print("❌ Audio file too short to extract segments")
+        return None
+        
+    print(f"🎯 Will test {max_segments} 20-second segments")
+    
+    # Generate start times (spread evenly across the audio)
+    start_times = []
+    available_duration = duration - 20  # Leave room for 20-second segment
+    
+    if available_duration <= 0:
+        print("❌ Audio file too short")
+        return None
+    
+    # Generate evenly spaced start times
+    for i in range(max_segments):
+        # Spread segments across the audio, avoiding the very beginning and end
+        start_time = 5 + (i * (available_duration - 10) / max_segments)
+        start_times.append(start_time)
+    
+    print(f"🎵 Segment start times: {[f'{t:.1f}s' for t in start_times]}")
+    
+    # Test each segment
+    results = []
+    for i, start_time in enumerate(start_times):
+        print(f"\n🎵 Testing segment {i+1}/{max_segments} (starting at {start_time:.1f}s)...")
+        
+        # Create temporary segment file
+        segment_path = Path(f"segment_{i+1}.mp3")
+        
+        # Extract segment
+        if not extract_audio_segment(audio_path, segment_path, start_time, 20):
+            print(f"❌ Failed to extract segment {i+1}")
+            continue
+        
+        # Test this segment
+        result = test_single_segment(segment_path, access_key, access_secret, host, i+1)
+        
+        # Clean up segment file
+        try:
+            segment_path.unlink()
+        except:
+            pass
+        
+        if result:
+            results.append(result)
+    
+    # Display summary of results
+    print("\n" + "="*60)
+    print("📊 IDENTIFICATION RESULTS")
+    print("="*60)
+    
+    if results:
+        print(f"✅ Found {len(results)} successful matches!")
+        print()
+        
+        # Group by song (in case multiple segments match the same song)
+        unique_songs = {}
+        for result in results:
+            song_key = f"{result['title']}_{result['artist']}"
+            if song_key not in unique_songs:
+                unique_songs[song_key] = result
+            else:
+                # Keep the one with higher confidence
+                if result['confidence'] > unique_songs[song_key]['confidence']:
+                    unique_songs[song_key] = result
+        
+        print(f"🎵 Unique songs found: {len(unique_songs)}")
+        print()
+        
+        for i, (song_key, song) in enumerate(unique_songs.items(), 1):
+            print(f"🎵 Song {i}:")
+            print(f"   Title: {song['title']}")
+            print(f"   Artist: {song['artist']}")
+            print(f"   Album: {song['album']}")
+            print(f"   Genre: {song['genre']}")
+            print(f"   Confidence: {song['confidence']}")
+            print(f"   Matched in segment: {song['segment']}")
+            print()
+        
+        # Return the best match (highest confidence)
+        best_match = max(unique_songs.values(), key=lambda x: x['confidence'])
+        return best_match
+    else:
+        print("❌ No music identified in any segment")
+        print("\n💡 This could mean:")
+        print("   • The audio contains mostly speech/dialogue")
+        print("   • The music is too quiet or obscured")
+        print("   • The song is not in ACRCloud's database")
+        print("   • The audio quality is too low")
+        print("   • The vocal removal didn't work well")
+        return None
+
+def test_single_segment(audio_path, access_key, access_secret, host, segment_num):
+    """Test a single audio segment with ACRCloud"""
     try:
-        with open(audio_path, 'rb') as f:
-            audio_data = f.read()
+        # Build the request URL
+        requrl = f"https://{host}/v1/identify"
         
-        # ACRCloud signature creation
-        import hashlib
-        import hmac
-        import base64
-        import time
-        
-        timestamp = str(int(time.time()))
+        # HTTP method and URI
         http_method = "POST"
         http_uri = "/v1/identify"
         data_type = "audio"
         signature_version = "1"
+        timestamp = time.time()
         
-        string_to_sign = '\n'.join([http_method, http_uri, api_key, data_type, signature_version, timestamp])
-        sign = base64.b64encode(hmac.new(api_key.encode('ascii'), string_to_sign.encode('ascii'), digestmod=hashlib.sha1).digest()).decode('ascii')
+        # Create signature string
+        string_to_sign = (http_method + "\n" + http_uri + "\n" + access_key + "\n" + 
+                         data_type + "\n" + signature_version + "\n" + str(timestamp))
         
-        headers = {
-            'access-key': api_key,
+        # Generate signature
+        sign = base64.b64encode(
+            hmac.new(access_secret.encode('ascii'), 
+                    string_to_sign.encode('ascii'),
+                    digestmod=hashlib.sha1).digest()
+        ).decode('ascii')
+        
+        # Get file size
+        sample_bytes = os.path.getsize(str(audio_path))
+        
+        # Prepare files and data for upload
+        files = [
+            ('sample', (audio_path.name, open(str(audio_path), 'rb'), 'audio/mpeg'))
+        ]
+        
+        data = {
+            'access_key': access_key,
+            'sample_bytes': sample_bytes,
+            'timestamp': str(timestamp),
             'signature': sign,
-            'signature-version': signature_version,
-            'timestamp': timestamp,
-            'data-type': data_type
+            'data_type': data_type,
+            'signature_version': signature_version
         }
         
-        files = {'sample': audio_data}
-        url = f"https://{host}/v1/identify"
-        response = requests.post(url, headers=headers, files=files)
+        print(f"📤 Uploading {sample_bytes} bytes to ACRCloud...")
         
-        if response.status_code == 200:
-            result = response.json()
-            if result.get('status', {}).get('code') == 0 and result.get('metadata', {}).get('music'):
-                music = result['metadata']['music'][0]
-                print("✅ Song identified with ACRCloud!")
-                print(f"🎵 Title: {music.get('title', 'Unknown')}")
-                print(f"👤 Artist: {music.get('artists', [{}])[0].get('name', 'Unknown')}")
-                print(f"📀 Album: {music.get('album', {}).get('name', 'Unknown')}")
-                print(f"🎼 Genre: {music.get('genres', [{}])[0].get('name', 'Unknown')}")
-                return music
+        # Make the request
+        r = requests.post(requrl, files=files, data=data, timeout=30)
+        r.encoding = "utf-8"
+        
+        # Parse JSON response
+        try:
+            result = json.loads(r.text)
+            
+            # Check status
+            status = result.get('status', {})
+            if status.get('code') == 0:
+                if result.get('metadata', {}).get('music'):
+                    print("✅ SUCCESS: Song identified!")
+                    music = result['metadata']['music'][0]
+                    print(f"🎵 Title: {music.get('title', 'Unknown')}")
+                    print(f"👤 Artist: {music.get('artists', [{}])[0].get('name', 'Unknown')}")
+                    print(f"📀 Album: {music.get('album', {}).get('name', 'Unknown')}")
+                    print(f"🎼 Genre: {music.get('genres', [{}])[0].get('name', 'Unknown')}")
+                    print(f"🎯 Confidence: {music.get('score', 'Unknown')}")
+                    return {
+                        'title': music.get('title', 'Unknown'),
+                        'artist': music.get('artists', [{}])[0].get('name', 'Unknown'),
+                        'album': music.get('album', {}).get('name', 'Unknown'),
+                        'genre': music.get('genres', [{}])[0].get('name', 'Unknown'),
+                        'confidence': music.get('score', 'Unknown'),
+                        'segment': segment_num
+                    }
+                else:
+                    print("⚠️  No music found in this segment")
+                    return None
             else:
-                print("❌ No match found with ACRCloud")
+                print(f"❌ API Error: {status.get('msg', 'Unknown error')}")
+                if status.get('code') == 3014:  # Invalid signature
+                    print("💡 This might be a credential issue - check your .env file")
+                    print("💡 Make sure you're using the Access Key (not Secret Key) from ACRCloud")
                 return None
-        else:
-            print(f"❌ ACRCloud API failed: {response.status_code}")
+                
+        except json.JSONDecodeError as e:
+            print(f"❌ Invalid JSON response: {e}")
             return None
             
     except Exception as e:
-        print(f"❌ ACRCloud error: {e}")
+        print(f"❌ Error: {e}")
         return None
-
-def open_web_services():
-    """Open web-based vocal removal services"""
-    print("\n🌐 Opening web-based vocal removal services...")
-    print("Choose one of these services to remove speech:")
-    
-    services = [
-        ("Hugging Face Demucs v4 - Best quality (recommended)", "https://huggingface.co/spaces/abidlabs/music-separation"),
-        ("Lalal.ai - High quality vocal removal", "https://lalal.ai"),
-        ("Moises.ai - AI-powered separation", "https://moises.ai"),
-        ("VocalRemover.org - Free online tool", "https://vocalremover.org"),
-        ("Splitter.ai - Another good option", "https://splitter.ai")
-    ]
-    
-    for i, (name, url) in enumerate(services, 1):
-        print(f"{i}. {name}")
-    
-    print("\n📋 Instructions:")
-    print("1. Upload your audio.mp3 file")
-    print("2. Use the vocal removal tool")
-    print("3. Download the instrumental version (no_vocals.wav)")
-    print("4. Use the ACRCloud API identification option below")
-    
-    choice = input("\nOpen which service? (1-5, or press Enter to skip): ").strip()
-    
-    if choice in ['1', '2', '3', '4', '5']:
-        service_url = services[int(choice) - 1][1]
-        webbrowser.open(service_url)
-        print(f"✅ Opened {service_url}")
-        
-        if choice == '1':
-            print("\n💡 Hugging Face Demucs v4 Tips:")
-            print("   - This uses the same Demucs v4 model we were trying to install")
-            print("   - Upload your audio.mp3 file")
-            print("   - Download the 'no_vocals.wav' file")
-            print("   - Place it in your current directory")
-            print("   - Use option 3 (ACRCloud with original audio) and manually specify the file")
 
 def cleanup_existing_files():
     """Delete existing MP3 files and other temporary files"""
@@ -251,8 +392,8 @@ def cleanup_existing_files():
         print("✅ No files to clean up")
 
 def main():
-    print("🎵 YouTube Short to Music Identification - Simple Pipeline")
-    print("=" * 60)
+    print("🎵 YouTube Short to Music Identification")
+    print("=" * 50)
     
     # Clean up existing files first
     cleanup_existing_files()
@@ -284,47 +425,69 @@ def main():
     print(f"\n✅ Audio downloaded to: {audio_path}")
     
     # Check if ACRCloud credentials are available
-    acrcloud_key = os.getenv('ACRCLOUD_API_KEY')
+    acrcloud_key = os.getenv('ACRCLOUD_ACCESS_KEY')
+    acrcloud_secret = os.getenv('ACRCLOUD_ACCESS_SECRET')
     acrcloud_host = os.getenv('ACRCLOUD_HOST')
     
-    if acrcloud_key and acrcloud_host:
+    if acrcloud_key and acrcloud_secret and acrcloud_host:
         print(f"✅ ACRCloud credentials found in .env file")
         print(f"   Host: {acrcloud_host}")
     else:
         print("⚠️  ACRCloud credentials not found in .env file")
     
-    print("\n🎯 Starting automated music identification pipeline...")
+    print("\n🎯 Choose your approach:")
+    print("1. 🎵 Use original audio with ACRCloud")
+    print("2. 🔇 Remove vocals with Demucs, then use ACRCloud")
     
-    # Step 1: Remove vocals using local Demucs
-    print("\n🔇 Step 1: Removing vocals...")
-    no_vocals_path = remove_speech(audio_path)
+    choice = input("\nEnter your choice (1-2): ").strip()
     
-    if not no_vocals_path or not no_vocals_path.exists():
-        print("❌ Could not remove vocals")
-        print("💡 Trying with original audio...")
-        no_vocals_path = audio_path
+    if choice == "1":
+        # Use original audio
+        print("\n🎵 Identifying with original audio...")
+        print(f"🎯 Using original audio file: {audio_path}")
+        result = identify_with_acrcloud_improved(audio_path)
     
-    # Step 2: Identify song with ACRCloud
-    print("\n🎵 Step 2: Identifying song...")
+    elif choice == "2":
+        # Remove vocals first
+        print("\n🔇 Step 1: Removing vocals with Demucs...")
+        no_vocals_path = remove_speech_demucs(audio_path)
+        
+        if not no_vocals_path or not no_vocals_path.exists():
+            print("❌ Could not remove vocals")
+            print("💡 Falling back to original audio...")
+            no_vocals_path = audio_path
+        
+        # Identify with processed audio
+        print("\n🎵 Step 2: Identifying song...")
+        print(f"🎯 Using vocals-removed file: {no_vocals_path}")
+        result = identify_with_acrcloud_improved(no_vocals_path)
     
-    if acrcloud_key and acrcloud_host:
-        result = identify_with_acrcloud(no_vocals_path)
     else:
-        # Ask for manual input
-        print("🔑 Enter ACRCloud credentials:")
-        manual_key = input("API Key: ").strip()
-        manual_host = input("Host: ").strip()
-        if manual_key and manual_host:
-            result = identify_with_acrcloud(no_vocals_path, manual_key, manual_host)
-        else:
-            print("❌ No credentials provided")
-            result = None
+        print("❌ Invalid choice")
+        return
     
+    # Handle results
     if result:
-        print("\n🎵 Song Information:")
-        print(json.dumps(result, indent=2))
+        print("\n🎉 SUCCESS! Song identified:")
+        print("=" * 40)
+        print(f"🎵 Title: {result.get('title', 'Unknown')}")
+        print(f"👤 Artist: {result.get('artist', 'Unknown')}")
+        print(f"📀 Album: {result.get('album', 'Unknown')}")
+        print(f"🎼 Genre: {result.get('genre', 'Unknown')}")
+        print(f"🎯 Confidence: {result.get('confidence', 'Unknown')}")
+        print("=" * 40)
     else:
-        print("\n❌ Could not identify the song")
+        print("\n❌ No music identified")
+        print("\n💡 This could mean:")
+        print("   • The audio contains mostly speech/dialogue")
+        print("   • The music is too quiet or obscured")
+        print("   • The song is not in ACRCloud's database")
+        print("   • The audio quality is too low")
+        
+        print("\n🔄 Try these solutions:")
+        print("   1. Try option 2 (remove vocals first)")
+        print("   2. Try with a different YouTube Short")
+        print("   3. Check if the audio actually contains music")
     
     print("\n🎉 Process completed!")
     print("\n💡 Get free ACRCloud API key from: https://www.acrcloud.com/")
