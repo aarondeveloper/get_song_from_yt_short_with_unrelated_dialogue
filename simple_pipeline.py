@@ -53,117 +53,58 @@ def download_with_yt_dlp(url):
         print(f"❌ Download failed: {e}")
         return None
 
-def extract_audio_with_ffmpeg(video_path):
-    """Extract audio using ffmpeg"""
-    print("🎵 Extracting audio...")
-    
+def remove_speech_demucs(audio_path):
+    """Remove vocals using local Demucs (Python API, fallback to subprocess)"""
+    print("🔇 Removing vocals using local Demucs...")
     try:
-        cmd = [
-            "ffmpeg",
-            "-i", str(video_path),
-            "-vn",
-            "-acodec", "mp3",
-            "-y",
-            "audio.mp3"
-        ]
-        
-        subprocess.run(cmd, capture_output=True, check=True)
-        print("✅ Audio extracted to audio.mp3")
-        return Path("audio.mp3")
-        
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Audio extraction failed: {e}")
-        return None
-
-def remove_speech_demucs_api(audio_path):
-    """Remove speech using Demucs Python API"""
-    print("🔇 Removing speech using Demucs API...")
-    print("⚠️  This may take a few minutes depending on audio length...")
-    
-    try:
-        # Import demucs
         import demucs.separate
-        
-        # Create output directory for Demucs
-        demucs_output = Path("separated")
-        demucs_output.mkdir(exist_ok=True)
-        
-        # Run Demucs using the Python API
-        # This is equivalent to: demucs --two-stems=vocals audio.mp3
-        demucs.separate.main([
-            "--two-stems=vocals",
-            "-o", str(demucs_output),
+        # Use the recommended model for best quality, output as MP3
+        args = [
+            "--two-stems", "vocals",
+            "-n", "htdemucs",
+            "--mp3",  # Output as MP3 instead of WAV
             str(audio_path)
-        ])
-        
-        # Find the separated audio file
-        # Demucs creates output in: separated/htdemucs/audio/no_vocals.wav
-        model_name = "htdemucs"  # Default model
-        audio_name = audio_path.stem
-        no_vocals_path = demucs_output / model_name / audio_name / "no_vocals.wav"
-        
+        ]
+        print(f"⚡ Running: demucs {' '.join(args)}")
+        demucs.separate.main(args)
+        # Find the output file (Demucs creates it in separated/htdemucs/audio_name/)
+        audio_name = Path(audio_path).stem
+        no_vocals_path = Path("separated") / "htdemucs" / audio_name / "no_vocals.mp3"
         if no_vocals_path.exists():
-            print("✅ Speech removed successfully using Demucs API")
+            print(f"✅ Vocals removed: {no_vocals_path}")
             return no_vocals_path
         else:
-            print("❌ Could not find separated audio file")
-            return None
-            
-    except ImportError:
-        print("❌ Demucs not installed. Installing...")
-        try:
-            subprocess.run([sys.executable, "-m", "pip", "install", "demucs"], check=True)
-            print("✅ Demucs installed successfully")
-            # Try again
-            return remove_speech_demucs_api(audio_path)
-        except subprocess.CalledProcessError:
-            print("❌ Failed to install Demucs")
-            return None
+            print(f"❌ Could not find {no_vocals_path}, trying subprocess fallback...")
     except Exception as e:
-        print(f"❌ Error removing speech with Demucs API: {e}")
-        return None
-
-def remove_speech_subprocess(audio_path):
-    """Remove speech using Demucs subprocess (fallback method)"""
-    print("🔇 Removing speech using Demucs subprocess...")
-    print("⚠️  This may take a few minutes depending on audio length...")
-    
+        print(f"⚠️  Demucs Python API failed: {e}")
+        print("🔄 Trying subprocess fallback...")
+    # Subprocess fallback
     try:
-        # Run Demucs to separate vocals and music
+        import subprocess
         cmd = [
             "demucs",
-            "--two-stems=vocals",  # Separate vocals from the rest
+            "--two-stems", "vocals",
+            "-n", "htdemucs",
+            "--mp3",  # Output as MP3 instead of WAV
             str(audio_path)
         ]
-        
-        subprocess.run(cmd, capture_output=True, check=True)
-        
-        # Demucs creates output in a specific directory structure
-        # Look for the "no_vocals" file
-        demucs_output = Path("separated") / "htdemucs" / audio_path.stem
-        no_vocals_path = demucs_output / "no_vocals.wav"
-        
+        print(f"⚡ Running: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+        audio_name = Path(audio_path).stem
+        no_vocals_path = Path("separated") / "htdemucs" / audio_name / "no_vocals.mp3"
         if no_vocals_path.exists():
-            print("✅ Speech removed successfully")
+            print(f"✅ Vocals removed: {no_vocals_path}")
             return no_vocals_path
         else:
-            print("❌ Could not find separated audio file")
+            print(f"❌ Could not find {no_vocals_path}")
             return None
-            
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error removing speech: {e}")
+    except Exception as e:
+        print(f"❌ Demucs subprocess also failed: {e}")
         return None
 
 def remove_speech(audio_path):
-    """Remove speech using Demucs (tries API first, then subprocess)"""
-    # Try Python API first
-    result = remove_speech_demucs_api(audio_path)
-    if result:
-        return result
-    
-    # Fallback to subprocess
-    print("🔄 Falling back to subprocess method...")
-    return remove_speech_subprocess(audio_path)
+    """Remove vocals using local Demucs only"""
+    return remove_speech_demucs(audio_path)
 
 def identify_with_acrcloud(audio_path, api_key=None, host=None):
     """Identify song using ACRCloud API"""
@@ -236,6 +177,7 @@ def open_web_services():
     print("Choose one of these services to remove speech:")
     
     services = [
+        ("Hugging Face Demucs v4 - Best quality (recommended)", "https://huggingface.co/spaces/abidlabs/music-separation"),
         ("Lalal.ai - High quality vocal removal", "https://lalal.ai"),
         ("Moises.ai - AI-powered separation", "https://moises.ai"),
         ("VocalRemover.org - Free online tool", "https://vocalremover.org"),
@@ -248,15 +190,23 @@ def open_web_services():
     print("\n📋 Instructions:")
     print("1. Upload your audio.mp3 file")
     print("2. Use the vocal removal tool")
-    print("3. Download the instrumental version")
+    print("3. Download the instrumental version (no_vocals.wav)")
     print("4. Use the ACRCloud API identification option below")
     
-    choice = input("\nOpen which service? (1-4, or press Enter to skip): ").strip()
+    choice = input("\nOpen which service? (1-5, or press Enter to skip): ").strip()
     
-    if choice in ['1', '2', '3', '4']:
+    if choice in ['1', '2', '3', '4', '5']:
         service_url = services[int(choice) - 1][1]
         webbrowser.open(service_url)
         print(f"✅ Opened {service_url}")
+        
+        if choice == '1':
+            print("\n💡 Hugging Face Demucs v4 Tips:")
+            print("   - This uses the same Demucs v4 model we were trying to install")
+            print("   - Upload your audio.mp3 file")
+            print("   - Download the 'no_vocals.wav' file")
+            print("   - Place it in your current directory")
+            print("   - Use option 3 (ACRCloud with original audio) and manually specify the file")
 
 def cleanup_existing_files():
     """Delete existing MP3 files and other temporary files"""
@@ -343,120 +293,38 @@ def main():
     else:
         print("⚠️  ACRCloud credentials not found in .env file")
     
-    # Ask user what they want to do
-    print("\n🎯 Choose your next step:")
-    print("1. Use web-based vocal removal (manual)")
-    print("2. ACRCloud API - Remove vocals first, then identify")
-    print("3. ACRCloud API - Identify with original audio (no vocal removal)")
-    print("4. Both web services and API options")
+    print("\n🎯 Starting automated music identification pipeline...")
     
-    choice = input("\nEnter your choice (1-4): ").strip()
+    # Step 1: Remove vocals using local Demucs
+    print("\n🔇 Step 1: Removing vocals...")
+    no_vocals_path = remove_speech(audio_path)
     
-    if choice in ['1', '4']:
-        open_web_services()
+    if not no_vocals_path or not no_vocals_path.exists():
+        print("❌ Could not remove vocals")
+        print("💡 Trying with original audio...")
+        no_vocals_path = audio_path
     
-    if choice in ['2', '3', '4']:
-        print("\n🔑 ACRCloud API Identification:")
-        
-        # Use credentials from .env file or ask user
-        if acrcloud_key and acrcloud_host:
-            use_env = input("Use credentials from .env file? (y/n): ").strip().lower()
-            if use_env == 'y':
-                if choice == '2':
-                    # Option 2: Remove vocals first, then identify
-                    print("\n🔇 Removing vocals using Demucs...")
-                    
-                    # Use integrated Demucs API
-                    no_vocals_path = remove_speech(audio_path)
-                    
-                    if no_vocals_path and no_vocals_path.exists():
-                        print("✅ Vocals removed successfully!")
-                        
-                        # Convert to MP3 for API (if needed)
-                        mp3_path = Path("no_vocals.mp3")
-                        convert_cmd = [
-                            "ffmpeg",
-                            "-i", str(no_vocals_path),
-                            "-acodec", "mp3",
-                            "-ab", "192k",
-                            "-y",
-                            str(mp3_path)
-                        ]
-                        
-                        subprocess.run(convert_cmd, capture_output=True, check=True)
-                        print("✅ Converted to MP3 for API upload")
-                        
-                        # Identify with ACRCloud
-                        result = identify_with_acrcloud(mp3_path)
-                    else:
-                        print("❌ Could not remove vocals")
-                        result = None
-                        
-                elif choice == '3':
-                    # Option 3: Identify with original audio
-                    result = identify_with_acrcloud(audio_path)
-                else:
-                    # Option 4: Both options
-                    print("\n🎵 Trying both methods...")
-                    
-                    # First try with vocal removal
-                    print("\n--- Method 1: With vocal removal ---")
-                    no_vocals_path = remove_speech(audio_path)
-                    
-                    result1 = None
-                    if no_vocals_path and no_vocals_path.exists():
-                        mp3_path = Path("no_vocals.mp3")
-                        convert_cmd = ["ffmpeg", "-i", str(no_vocals_path), "-acodec", "mp3", "-ab", "192k", "-y", str(mp3_path)]
-                        subprocess.run(convert_cmd, capture_output=True, check=True)
-                        
-                        result1 = identify_with_acrcloud(mp3_path)
-                        if result1:
-                            print("\n🎵 Result with vocal removal:")
-                            print(json.dumps(result1, indent=2))
-                    
-                    # Then try with original audio
-                    print("\n--- Method 2: With original audio ---")
-                    result2 = identify_with_acrcloud(audio_path)
-                    if result2:
-                        print("\n🎵 Result with original audio:")
-                        print(json.dumps(result2, indent=2))
-                    
-                    result = result1 or result2
-                    
-            else:
-                # Ask for manual input
-                manual_key = input("Enter ACRCloud API key: ").strip()
-                manual_host = input("Enter ACRCloud host: ").strip()
-                if manual_key and manual_host:
-                    if choice == '2':
-                        print("🔇 Manual vocal removal not supported. Please use web services first.")
-                        result = None
-                    elif choice == '3':
-                        result = identify_with_acrcloud(audio_path, manual_key, manual_host)
-                    else:
-                        result = identify_with_acrcloud(audio_path, manual_key, manual_host)
-                else:
-                    print("❌ No credentials provided")
-                    result = None
+    # Step 2: Identify song with ACRCloud
+    print("\n🎵 Step 2: Identifying song...")
+    
+    if acrcloud_key and acrcloud_host:
+        result = identify_with_acrcloud(no_vocals_path)
+    else:
+        # Ask for manual input
+        print("🔑 Enter ACRCloud credentials:")
+        manual_key = input("API Key: ").strip()
+        manual_host = input("Host: ").strip()
+        if manual_key and manual_host:
+            result = identify_with_acrcloud(no_vocals_path, manual_key, manual_host)
         else:
-            # No .env credentials, ask for manual input
-            manual_key = input("Enter ACRCloud API key: ").strip()
-            manual_host = input("Enter ACRCloud host: ").strip()
-            if manual_key and manual_host:
-                if choice == '2':
-                    print("🔇 Manual vocal removal not supported. Please use web services first.")
-                    result = None
-                elif choice == '3':
-                    result = identify_with_acrcloud(audio_path, manual_key, manual_host)
-                else:
-                    result = identify_with_acrcloud(audio_path, manual_key, manual_host)
-            else:
-                print("❌ No credentials provided")
-                result = None
-        
-        if result:
-            print("\n🎵 ACRCloud Result:")
-            print(json.dumps(result, indent=2))
+            print("❌ No credentials provided")
+            result = None
+    
+    if result:
+        print("\n🎵 Song Information:")
+        print(json.dumps(result, indent=2))
+    else:
+        print("\n❌ Could not identify the song")
     
     print("\n🎉 Process completed!")
     print("\n💡 Get free ACRCloud API key from: https://www.acrcloud.com/")
