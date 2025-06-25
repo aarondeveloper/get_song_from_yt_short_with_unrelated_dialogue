@@ -31,10 +31,7 @@ def download_with_yt_dlp(url):
     try:
         cmd = [
             "yt-dlp",
-            "-f", "best",  # Use best available format
-            "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "--no-check-certificates",  # Skip certificate verification
-            "--extractor-args", "youtube:player_client=web",  # Use web client
+            "-f", "b",  # Best pre-merged format (suppresses warning)
             "-o", "video.%(ext)s",
             url
         ]
@@ -52,55 +49,7 @@ def download_with_yt_dlp(url):
             
     except subprocess.CalledProcessError as e:
         print(f"❌ Download failed: {e}")
-        print("🔄 Trying alternative download method...")
-        
-        try:
-            alt_cmd = [
-                "yt-dlp",
-                "-f", "worst",  # Try worst quality (most likely to work)
-                "--no-check-certificates",
-                "--extractor-args", "youtube:player_client=web",
-                "-o", "video.%(ext)s",
-                url
-            ]
-            
-            subprocess.run(alt_cmd, check=True)
-            print("✅ Download completed with alternative method!")
-            
-            # Find the downloaded file
-            video_files = list(Path(".").glob("video.*"))
-            if video_files:
-                return video_files[0]
-            else:
-                print("❌ Could not find downloaded video file")
-                return None
-                
-        except subprocess.CalledProcessError as e2:
-            print(f"❌ Alternative download also failed: {e2}")
-            print("🔄 Trying with no format restrictions...")
-            
-            try:
-                final_cmd = [
-                    "yt-dlp",
-                    "--no-check-certificates",
-                    "-o", "video.%(ext)s",
-                    url
-                ]
-                
-                subprocess.run(final_cmd, check=True)
-                print("✅ Download completed with no format restrictions!")
-                
-                # Find the downloaded file
-                video_files = list(Path(".").glob("video.*"))
-                if video_files:
-                    return video_files[0]
-                else:
-                    print("❌ Could not find downloaded video file")
-                    return None
-                    
-            except subprocess.CalledProcessError as e3:
-                print(f"❌ All download methods failed: {e3}")
-                return None
+        return None
 
 def extract_audio_with_ffmpeg(video_path):
     """Extract audio using ffmpeg"""
