@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Test script for ACRCloud REST API functionality
+Enhanced ACRCloud Test Script
+Tests multiple 20-second segments from separated no-vocals audio
 """
 
 import os
@@ -53,8 +54,27 @@ def extract_audio_segment(input_path, output_path, start_time, duration=20):
         print(f"❌ Failed to extract segment: {e}")
         return False
 
+def find_no_vocals_audio():
+    """Find the separated no-vocals audio file"""
+    # Look for the no_vocals.mp3 file in the separated directory
+    no_vocals_path = Path("separated/htdemucs/audio/no_vocals.mp3")
+    
+    if no_vocals_path.exists():
+        print(f"✅ Found no-vocals audio: {no_vocals_path}")
+        return no_vocals_path
+    
+    # Fallback to original audio if no separated file exists
+    original_audio = Path("audio.mp3")
+    if original_audio.exists():
+        print(f"⚠️  No separated audio found, using original: {original_audio}")
+        return original_audio
+    
+    print("❌ No audio files found!")
+    print("💡 Run the pipeline first to download and separate audio")
+    return None
+
 def test_acrcloud_rest_api():
-    """Test ACRCloud REST API with a sample audio file"""
+    """Test ACRCloud REST API with separated no-vocals audio segments"""
     
     # Check credentials
     access_key = os.getenv('ACRCLOUD_ACCESS_KEY')
@@ -74,79 +94,115 @@ def test_acrcloud_rest_api():
     print(f"   Access Key: {access_key[:8]}...")
     print(f"   Access Secret: {access_secret[:8]}...")
     
-    # Check if we have an audio file to test with
-    audio_files = list(Path(".").glob("*.mp3"))
-    if not audio_files:
-        print("❌ No MP3 files found for testing")
-        print("💡 Run the pipeline first to download an audio file")
+    # Find the audio file to test with
+    audio_file = find_no_vocals_audio()
+    if not audio_file:
         return False
     
-    test_file = audio_files[0]
-    print(f"🎵 Testing with: {test_file}")
-    
     # Get file size and duration
-    sample_bytes = os.path.getsize(str(test_file))
-    duration = get_audio_duration(test_file)
+    sample_bytes = os.path.getsize(str(audio_file))
+    duration = get_audio_duration(audio_file)
     
     print(f"📊 File size: {sample_bytes} bytes")
     print(f"⏱️  Duration: {duration:.1f} seconds")
     
-    # Check if we need to chunk the file
-    if sample_bytes > 1024 * 1024 or duration > 60:  # 1MB or >60 seconds
-        print("📦 File is large, extracting multiple 20-second segments...")
-        
-        # Calculate how many segments we can extract
-        max_segments = min(2, int(duration // 20))  # Changed from 5 to 2
-        if max_segments < 1:
-            print("❌ Audio file too short to extract segments")
-            return False
-            
-        print(f"🎯 Will test {max_segments} random 20-second segments")
-        
-        # Generate random start times (avoiding the very beginning and end)
-        available_duration = duration - 20  # Leave room for 20-second segment
-        if available_duration <= 0:
-            print("❌ Audio file too short")
-            return False
-            
-        # Generate random start times
-        start_times = []
-        for i in range(max_segments):
-            start_time = random.uniform(5, available_duration - 5)  # Avoid very beginning/end
-            start_times.append(start_time)
-        
-        # Test each segment
-        for i, start_time in enumerate(start_times):
-            print(f"\n🎵 Testing segment {i+1}/{max_segments} (starting at {start_time:.1f}s)...")
-            
-            # Create temporary segment file
-            segment_path = Path(f"test_segment_{i+1}.mp3")
-            
-            # Extract segment
-            if not extract_audio_segment(test_file, segment_path, start_time, 20):
-                print(f"❌ Failed to extract segment {i+1}")
-                continue
-            
-            # Test this segment
-            success = test_single_segment(segment_path, access_key, access_secret, host)
-            
-            # Clean up segment file
-            try:
-                segment_path.unlink()
-            except:
-                pass
-            
-            if success:
-                print(f"✅ Success with segment {i+1}!")
-                return True
-        
-        print("\n❌ No segments matched")
+    # Always extract multiple segments for better testing
+    print("📦 Extracting multiple 20-second segments for testing...")
+    
+    # Calculate how many segments we can extract
+    max_segments = min(5, int(duration // 20))  # Test up to 5 segments
+    if max_segments < 1:
+        print("❌ Audio file too short to extract segments")
         return False
+        
+    print(f"🎯 Will test {max_segments} 20-second segments")
+    
+    # Generate start times (spread evenly across the audio)
+    start_times = []
+    available_duration = duration - 20  # Leave room for 20-second segment
+    
+    if available_duration <= 0:
+        print("❌ Audio file too short")
+        return False
+    
+    # Generate evenly spaced start times
+    for i in range(max_segments):
+        # Spread segments across the audio, avoiding the very beginning and end
+        start_time = 5 + (i * (available_duration - 10) / max_segments)
+        start_times.append(start_time)
+    
+    print(f"🎵 Segment start times: {[f'{t:.1f}s' for t in start_times]}")
+    
+    # Test each segment
+    results = []
+    for i, start_time in enumerate(start_times):
+        print(f"\n🎵 Testing segment {i+1}/{max_segments} (starting at {start_time:.1f}s)...")
+        
+        # Create temporary segment file
+        segment_path = Path(f"test_segment_{i+1}.mp3")
+        
+        # Extract segment
+        if not extract_audio_segment(audio_file, segment_path, start_time, 20):
+            print(f"❌ Failed to extract segment {i+1}")
+            continue
+        
+        # Test this segment
+        result = test_single_segment(segment_path, access_key, access_secret, host, i+1)
+        
+        # Clean up segment file
+        try:
+            segment_path.unlink()
+        except:
+            pass
+        
+        if result:
+            results.append(result)
+    
+    # Display summary of results
+    print("\n" + "="*60)
+    print("📊 TEST RESULTS SUMMARY")
+    print("="*60)
+    
+    if results:
+        print(f"✅ Found {len(results)} successful matches!")
+        print()
+        
+        # Group by song (in case multiple segments match the same song)
+        unique_songs = {}
+        for result in results:
+            song_key = f"{result['title']}_{result['artist']}"
+            if song_key not in unique_songs:
+                unique_songs[song_key] = result
+            else:
+                # Keep the one with higher confidence
+                if result['confidence'] > unique_songs[song_key]['confidence']:
+                    unique_songs[song_key] = result
+        
+        print(f"🎵 Unique songs found: {len(unique_songs)}")
+        print()
+        
+        for i, (song_key, song) in enumerate(unique_songs.items(), 1):
+            print(f"🎵 Song {i}:")
+            print(f"   Title: {song['title']}")
+            print(f"   Artist: {song['artist']}")
+            print(f"   Album: {song['album']}")
+            print(f"   Genre: {song['genre']}")
+            print(f"   Confidence: {song['confidence']}")
+            print(f"   Matched in segment: {song['segment']}")
+            print()
+        
+        return True
     else:
-        # File is small enough, test directly
-        return test_single_segment(test_file, access_key, access_secret, host)
+        print("❌ No music identified in any segment")
+        print("\n💡 This could mean:")
+        print("   • The audio contains mostly speech/dialogue")
+        print("   • The music is too quiet or obscured")
+        print("   • The song is not in ACRCloud's database")
+        print("   • The audio quality is too low")
+        print("   • The vocal removal didn't work well")
+        return False
 
-def test_single_segment(audio_path, access_key, access_secret, host):
+def test_single_segment(audio_path, access_key, access_secret, host, segment_num):
     """Test a single audio segment with ACRCloud"""
     try:
         # Build the request URL
@@ -163,24 +219,12 @@ def test_single_segment(audio_path, access_key, access_secret, host):
         string_to_sign = (http_method + "\n" + http_uri + "\n" + access_key + "\n" + 
                          data_type + "\n" + signature_version + "\n" + str(timestamp))
         
-        # Debug: Show signature components
-        print(f"🔍 Debug - Signature components:")
-        print(f"   HTTP Method: {http_method}")
-        print(f"   HTTP URI: {http_uri}")
-        print(f"   Access Key: {access_key}")
-        print(f"   Data Type: {data_type}")
-        print(f"   Signature Version: {signature_version}")
-        print(f"   Timestamp: {timestamp}")
-        print(f"   String to sign: {repr(string_to_sign)}")
-        
         # Generate signature
         sign = base64.b64encode(
             hmac.new(access_secret.encode('ascii'), 
                     string_to_sign.encode('ascii'),
                     digestmod=hashlib.sha1).digest()
         ).decode('ascii')
-        
-        print(f"   Generated Signature: {sign}")
         
         # Get file size
         sample_bytes = os.path.getsize(str(audio_path))
@@ -199,14 +243,11 @@ def test_single_segment(audio_path, access_key, access_secret, host):
             'signature_version': signature_version
         }
         
-        print(f"📤 Uploading {sample_bytes} bytes to: {requrl}")
+        print(f"📤 Uploading {sample_bytes} bytes to ACRCloud...")
         
         # Make the request
         r = requests.post(requrl, files=files, data=data, timeout=30)
         r.encoding = "utf-8"
-        
-        print(f"📄 Response status: {r.status_code}")
-        print(f"📄 Response text: {r.text}")
         
         # Parse JSON response
         try:
@@ -218,33 +259,44 @@ def test_single_segment(audio_path, access_key, access_secret, host):
                 if result.get('metadata', {}).get('music'):
                     print("✅ SUCCESS: Song identified!")
                     music = result['metadata']['music'][0]
-                    print(f"🎵 Title: {music.get('title', 'Unknown')}")
-                    print(f"👤 Artist: {music.get('artists', [{}])[0].get('name', 'Unknown')}")
-                    print(f"📀 Album: {music.get('album', {}).get('name', 'Unknown')}")
-                    print(f"🎼 Genre: {music.get('genres', [{}])[0].get('name', 'Unknown')}")
-                    print(f"🎯 Confidence: {music.get('score', 'Unknown')}")
-                    return True
+                    
+                    # Extract song information
+                    song_info = {
+                        'title': music.get('title', 'Unknown'),
+                        'artist': music.get('artists', [{}])[0].get('name', 'Unknown'),
+                        'album': music.get('album', {}).get('name', 'Unknown'),
+                        'genre': music.get('genres', [{}])[0].get('name', 'Unknown'),
+                        'confidence': music.get('score', 'Unknown'),
+                        'segment': segment_num
+                    }
+                    
+                    print(f"   🎵 Title: {song_info['title']}")
+                    print(f"   👤 Artist: {song_info['artist']}")
+                    print(f"   📀 Album: {song_info['album']}")
+                    print(f"   🎼 Genre: {song_info['genre']}")
+                    print(f"   🎯 Confidence: {song_info['confidence']}")
+                    
+                    return song_info
                 else:
                     print("⚠️  No music found in this segment")
-                    return False
+                    return None
             else:
                 print(f"❌ API Error: {status.get('msg', 'Unknown error')}")
                 if status.get('code') == 3014:  # Invalid signature
                     print("💡 This might be a credential issue - check your .env file")
-                    print("💡 Make sure you're using the Access Key (not Secret Key) from ACRCloud")
-                return False
+                return None
                 
         except json.JSONDecodeError as e:
             print(f"❌ Invalid JSON response: {e}")
-            return False
+            return None
             
     except Exception as e:
         print(f"❌ Error: {e}")
-        return False
+        return None
 
 def main():
-    print("🧪 ACRCloud REST API Test")
-    print("=" * 40)
+    print("🧪 Enhanced ACRCloud Test with No-Vocals Audio")
+    print("=" * 60)
     
     success = test_acrcloud_rest_api()
     
@@ -255,10 +307,10 @@ def main():
         print("\n💡 Troubleshooting tips:")
         print("1. Check your ACRCloud credentials in .env file")
         print("2. Verify your ACRCloud project is active")
-        print("3. Make sure you have an MP3 file to test with")
-        print("4. Check your internet connection")
-        print("5. Verify the audio file is not corrupted")
-        print("6. Try with a different audio file")
+        print("3. Run the pipeline first to download and separate audio")
+        print("4. Check if the audio actually contains music")
+        print("5. Try with a different YouTube Short")
+        print("6. Verify your internet connection")
 
 if __name__ == "__main__":
     main() 
