@@ -339,6 +339,44 @@ If you encounter issues:
 3. Create a new issue with detailed information
 4. Include your operating system and error messages
 
+## 🔍 Manual Verification with Shazam
+
+If the automatic identification fails or gives incorrect results, you can use Shazam as a backup method:
+
+### When to Use Manual Verification
+- **No song found** by ACRCloud
+- **Incorrect song identified** 
+- **Low confidence scores**
+- **Want to double-check results**
+
+### Manual Verification Steps
+
+1. **Locate the separated audio file**
+   - The pipeline will show you the exact path
+   - Usually: `separated/htdemucs/audio/no_vocals.mp3`
+
+2. **Play the audio file**
+   - Open the file on your computer
+   - Play at **loud volume** for best results
+   - Ensure good audio quality
+
+3. **Use Shazam on your phone**
+   - Open the Shazam app
+   - Let it listen to the background music
+   - Shazam works well with clean instrumental tracks
+
+### Why This Works
+- **Shazam excels** at identifying clean music without vocals
+- **No speech interference** since vocals are removed
+- **Better recognition** of instrumental parts
+- **Real-time identification** with immediate results
+
+### Tips for Best Results
+- **Use headphones** or good speakers
+- **Minimize background noise** in your environment
+- **Play the entire track** if it's short
+- **Try different segments** if the first attempt fails
+
 ---
 
 **Happy Music Finding! 🎵** 
